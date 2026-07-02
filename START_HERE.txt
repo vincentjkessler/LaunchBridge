@@ -1,0 +1,7 @@
+LaunchBridge v0.3.1 — Smart Click Reliability Fix
+
+1. Open this .devmind update through the working LaunchBridge.
+2. After the update, open edge://extensions or chrome://extensions.
+3. Press Reload on LaunchBridge Smart Click once.
+4. Click the Smart Click toolbar icon. It should say the native helper is connected.
+5. Click a supported app download link in ChatGPT.

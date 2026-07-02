@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "productId": "devmind-launchbridge",
+  "version": "0.3.1",
+  "checks": [
+    "root manifest and payload",
+    "complete payload hashes",
+    "required files including app.manifest and MIT license",
+    "PowerShell recovery bootstrap",
+    "csc response-file compilation",
+    "compile before replace",
+    "archive integrity",
+    "all five C# source files parse without syntax errors",
+    "Extension Profile migration from registered extensions",
+    "full short and icon AI prompt generation",
+    "immediate prompt dialog and clipboard copy",
+    "ICO and raster icon import",
+    "Windows association uses profile icon",
+    "manifest-free smart package path",
+    "filename product and version parsing",
+    "smart entry-point detection",
+    "remembered entry-point reuse",
+    "smart-package Turbo Launch fingerprinting",
+    "advanced manifest package compatibility",
+    "Package Builder tab remains removed",
+    "MIT license and open specifications included"
+  ],
+  "dpi": {
+    "manifest": "PerMonitorV2,PerMonitor",
+    "runtimeFallback": "SetProcessDpiAwarenessContext then SetProcessDPIAware",
+    "winFormsAutoScale": "Dpi",
+    "compatibleTextRendering": false,
+    "runtimeConfig": "LaunchBridge.exe.config high-DPI resizing and DPI-change switches"
+  },
+  "compatibility": {
+    "productIdPreserved": true,
+    "legacyStateRootPreserved": true,
+    "legacyExecutableRemovedAfterSuccessfulCompile": true,
+    "legacyShortcutsMigratedWhenPresent": true
+  },
+  "primary_change": "Smart Click reliability fix",
+  "package_builder_tab_registered": false,
+  "extension_profiles": {
+    "schemaVersion": 1,
+    "manifestRequired": false,
+    "promptVariants": [
+      "full",
+      "short",
+      "icon"
+    ],
+    "iconFormats": [
+      "ico",
+      "png",
+      "jpg",
+      "jpeg",
+      "bmp",
+      "gif"
+    ]
+  },
+  "smart_packages": {
+    "filenameConvention": "<ProductName>_v<Version>.<extension>",
+    "supportedEntryTypes": [
+      "exe",
+      "cmd",
+      "bat",
+      "ps1",
+      "node/electron",
+      "html"
+    ],
+    "advancedManifestCompatibility": true
+  },
+  "default_tab": "Extensions",
+  "smart_click_contract": {
+    "extension_manifest": true,
+    "native_host_source": true,
+    "native_host_registration": true,
+    "normal_zip_support": true
+  }
+}

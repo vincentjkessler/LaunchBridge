@@ -1,0 +1,15 @@
+LaunchBridge v0.3.1 QA REPORT
+
+Primary change: Smart Click reliability fix.
+
+Checks:
+- Browser manifest JSON parses and retains downloads, nativeMessaging, notifications, and storage permissions.
+- Content script records pointer-down before download creation and deduplicates click fallback.
+- Background worker persists pending/tracked transactions in chrome.storage.session.
+- Background worker supports retroactive matching, approved referrer fallback, recovery, and native ping.
+- Native host supports ping and openDownloadedBuild actions.
+- Required files present.
+- Payload hashes regenerated.
+- Package ZIP integrity validated.
+
+The target Windows machine still performs authoritative C# compilation before replacement.

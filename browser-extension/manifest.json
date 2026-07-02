@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "LaunchBridge Smart Click",
+  "version": "0.2.0",
+  "description": "Reliably detects completed AI downloads and sends supported app packages to LaunchBridge.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzIIij4M71ILj/GreqhiR86k6wBKTLfG8QkadpH2fcyHVbVGvrHxTTispv0QDYtsuoe+q3LCMCPYXGBSkltvf0fXPaJcFrUlF1QapSE4yo/WP0e54PtBFNZNVPq1+s9nn6rHdVC0uVFUT5ZmtHk1B51RT3IvDXnrrr2vvBhLFOn7JBQCnLO3FXCHLsu3JKS17zLa4JtZf0pxQ6Y8TW70I9ibMiUd3RL1MlQNwEgLyhwCW9Vh9KM7RptBS+VLr6e2bScF/j+3sindGWO6eZGhwCZPV05XKbNqeWeCNrDHW5YHMgCbCUm4nz/oRg0mrKhxbysBgYc24qeJ88nJ97sVkuwIDAQAB",
+  "permissions": [
+    "downloads",
+    "nativeMessaging",
+    "notifications",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://gemini.google.com/*",
+    "https://claude.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://gemini.google.com/*",
+        "https://claude.ai/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "LaunchBridge Smart Click"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

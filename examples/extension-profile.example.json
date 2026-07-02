@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "extension": ".badmoth",
+  "displayName": "BadMoth Package",
+  "description": "A complete runnable BadMoth application or update",
+  "packageMode": "smart",
+  "manifestRequired": false,
+  "manifestAllowed": true,
+  "autoLaunch": true,
+  "processSupervision": true,
+  "preserveState": true,
+  "preserveStatePaths": [
+    "data",
+    "user-data",
+    "projects",
+    "workspace",
+    "config"
+  ]
+}
