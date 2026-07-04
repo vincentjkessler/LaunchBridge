@@ -1,28 +1,28 @@
-# Contributing to LaunchBridge
+# Contributing
 
-LaunchBridge is an open, AI-native local application delivery runtime for Windows.
+Thanks for helping LaunchBridge.
 
-## Contribution priorities
+Please keep changes simple and safe.
 
-1. Deterministic package identification and safe extraction.
-2. Reliable smart entry-point detection.
-3. Extension Profile portability and icon handling.
-4. Process lifecycle supervision and repair packets.
-5. Browser handoff and native messaging.
-6. Code-signing, publisher trust, and sandboxed first launch.
+## Good Things To Work On
 
-## Ground rules
+- Make package checks safer.
+- Make app starting more reliable.
+- Make problem messages easier to understand.
+- Keep browser handoff simple.
+- Keep old packages working.
 
-- Keep existing manifest packages backward-compatible.
-- Never weaken archive traversal, executable, or script safety checks.
-- Prefer conventions that work across ChatGPT, Gemini, Claude, and other AIs.
-- Avoid provider-specific lock-in.
-- Preserve installed product state during updates.
-- Add a reproducible test case for package-detection changes.
+## Safety Rules
 
-## Windows build
+- Do not weaken file safety checks.
+- Do not break old package formats.
+- Do not delete a user's installed app data during an update.
+- Add a small test or clear manual check when you change package handling.
 
-LaunchBridge targets the installed .NET Framework compiler and Windows Forms. The self-update package compiles before replacing a working installation.
+## Build
 
+On Windows, run:
 
-Smart Click contributions should keep the browser companion thin. Package validation and execution decisions belong in the desktop runtime, not the extension.
+```bat
+BUILD_PORTABLE.cmd
+```

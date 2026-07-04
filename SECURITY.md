@@ -1,22 +1,24 @@
-# Security Policy
+# Security
 
-LaunchBridge handles local package installation and browser-to-desktop handoff, so security reports are treated as high priority.
+LaunchBridge opens local app packages, so security reports matter.
 
-## Supported Versions
+## Supported Version
 
-The latest GitHub Release is the supported public build.
+Only the latest GitHub Release is supported.
 
-## Reporting a Vulnerability
+## Report A Problem
 
-Do not publish exploit details in a public issue.
+Please do not post private security details in a public issue.
 
-Report security problems through GitHub private vulnerability reporting if it is enabled for this repository, or contact the project maintainer directly with:
+Use GitHub private vulnerability reporting if it is turned on. You can also contact the maintainer directly.
+
+Please include:
 
 - LaunchBridge version
-- Operating system and browser
-- Steps to reproduce
-- Expected result
-- Actual result
-- Any relevant logs or screenshots with secrets removed
+- Windows version
+- Browser name
+- Steps to repeat the problem
+- What you expected
+- What happened instead
 
-Please do not include API keys, private source code, customer data, access tokens, or credentials in reports.
+Do not send passwords, API keys, private code, access tokens, or customer data.

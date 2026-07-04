@@ -1,47 +1,56 @@
 # LaunchBridge
 
-LaunchBridge is a Windows package host for AI-native software artifacts. It helps users inspect, install, update, and launch `.devmind` packages from a consistent local runtime.
+LaunchBridge is a small Windows app that opens local app packages.
 
-The current public release is `v0.3.1`, the Smart Click reliability fix.
+It helps you try apps that come as `.devmind` packages. It can check the package, install it on your computer, and start it.
 
-## Download
+## What It Does
 
-Use the latest GitHub Release for the tested `.devmind` package. The repository contains the source, documentation, package scripts, and browser companion files. Release assets contain the tested downloadable package intended for end users.
+- Opens `.devmind` app packages.
+- Keeps installed apps in one place.
+- Helps your browser send a downloaded package to LaunchBridge.
+- Shows clear problem reports when an app does not start.
+- Lets you copy problem details so you can paste them into an AI chat for help.
 
-## Smart Click
+## Get It
 
-Smart Click removes the second browser action from the AI-download workflow:
+Use the latest GitHub Release for the ready-to-run package.
 
-1. A user clicks a runnable package link in ChatGPT, Gemini, Claude, or another approved source.
-2. The browser finishes the download.
-3. The LaunchBridge browser companion sends the local file path to LaunchBridge.
-4. LaunchBridge inspects, installs, and launches the package.
+This repo has the source code and helper files. Most people should download the release file, not build the app by hand.
 
-Normal documents, images, and unsupported downloads are ignored.
+## What Is New In v0.3.3
 
-## v0.3.1 Reliability Fix
+The Problems tab is easier to use.
 
-This release repairs the first-pass Smart Click event chain:
+- The **Copy problem details** button is now easier to find.
+- The button stays visible in shorter windows.
+- LaunchBridge tells you when the problem details were copied.
+- If copying fails, LaunchBridge tells you to copy the visible text by hand.
 
-- Records download intent on pointer-down, before the browser starts the download.
-- Persists pending clicks and tracked download IDs in `chrome.storage.session`.
-- Retroactively matches downloads created before the click message arrives.
-- Uses browser download referrer as a fallback for approved AI sites.
-- Recovers tracked downloads after Manifest V3 service-worker restarts.
-- Adds a native-helper connection test from the extension icon.
-- Shows badge states for seen clicks, successful handoff, and connection failure.
+## Browser Helper
 
-After updating the unpacked browser companion, reload the extension once from the browser Extensions page. Restarting the browser also reloads it.
+LaunchBridge includes a browser helper for Chromium browsers.
 
-## Repository Layout
+When you click a supported package download in ChatGPT, Gemini, Claude, or another approved site, the helper can pass the finished download to LaunchBridge.
 
-- `src/` - C# LaunchBridge runtime source.
-- `browser-extension/` - Chromium companion extension for Smart Click.
-- `docs/` - package format, architecture, profile, and Smart Click specs.
-- `examples/` - package and extension-profile examples.
-- `*.cmd` and `*.ps1` - local install, update, build, and uninstall scripts.
-- `QA_REPORT.txt` and `launchbridge.qa.json` - release validation evidence.
+Normal files like pictures and documents are left alone.
+
+## Build From Source
+
+On Windows, run:
+
+```bat
+BUILD_PORTABLE.cmd
+```
+
+LaunchBridge uses Windows Forms and the .NET Framework tools that are already on many Windows systems.
+
+## Main Folders
+
+- `src` has the Windows app source code.
+- `browser-extension` has the browser helper.
+- `assets` has the app icon and image.
 
 ## License
 
-LaunchBridge is open source under the Apache License 2.0.
+LaunchBridge is open source under the MIT License.

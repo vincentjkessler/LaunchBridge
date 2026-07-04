@@ -3,7 +3,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 echo ============================================================
-echo  LaunchBridge v0.3.1 - Build and Install
+echo  LaunchBridge v0.3.3 - Build and Install
 echo ============================================================
 echo.
 

@@ -41,9 +41,13 @@ namespace DevMind.LaunchBridge
         private static int runtimeIssuePort;
         private static string runtimeIssueToken;
         private static string runtimeIssuesRoot;
+        private static string runtimeIssueClearMarkerPath;
         private static string repairPacketsRoot;
         private static string extensionProfilesRoot;
         private static string extensionIconsRoot;
+        private static readonly object LaunchProcessSync = new object();
+        private static readonly Dictionary<int, LaunchProcessCapture> launchProcessCaptures = new Dictionary<int, LaunchProcessCapture>();
+        private static readonly HashSet<int> suppressedExitIssuePids = new HashSet<int>();
         private static readonly object LifecycleSync = new object();
         private static readonly Dictionary<string, LifecycleWatch> lifecycleWatches = new Dictionary<string, LifecycleWatch>(StringComparer.OrdinalIgnoreCase);
         private static Thread lifecycleSupervisorThread;
@@ -65,6 +69,26 @@ namespace DevMind.LaunchBridge
             public bool ApplicationWindowSeen;
             public DateTime? LauncherMissingSinceUtc;
             public DateTime? ApplicationWindowMissingSinceUtc;
+        }
+
+        private sealed class LaunchProcessCapture
+        {
+            public Process Process;
+            public int ProcessId;
+            public string ProductId;
+            public string DisplayName;
+            public string Version;
+            public string InstallPath;
+            public string EntryPath;
+            public string EntryType;
+            public string CommandLine;
+            public string LogPath;
+            public DateTime StartedAtUtc;
+            public bool CaptureStreams;
+            public readonly object TextSync = new object();
+            public readonly StringBuilder StandardOutput = new StringBuilder();
+            public readonly StringBuilder StandardError = new StringBuilder();
+            public int CompletionStarted;
         }
 
         private sealed class ProcessSnapshot
@@ -349,6 +373,7 @@ namespace DevMind.LaunchBridge
             managedBrowserProfileRoot = Path.Combine(browserProfilesRoot, "managed-apps");
             configPath = Path.Combine(appRoot, "config.json");
             runtimeIssuesRoot = Path.Combine(appRoot, "runtime-issues");
+            runtimeIssueClearMarkerPath = Path.Combine(runtimeIssuesRoot, ".cleared-at-utc.txt");
             repairPacketsRoot = Path.Combine(appRoot, "repair-packets");
             extensionProfilesRoot = Path.Combine(appRoot, "extension-profiles");
             extensionIconsRoot = Path.Combine(appRoot, "extension-icons");
@@ -364,6 +389,7 @@ namespace DevMind.LaunchBridge
             config = LoadConfig();
             NormalizeConfig();
             SaveConfig();
+            LoadRecentRuntimeIssues();
             ApplyTurboLaunchSettings();
             StartRuntimeIssueServer();
             StartProductLifecycleSupervisor();
@@ -1159,6 +1185,8 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
             string stateBackup = null;
             string rollbackPath = null;
             string installPath = null;
+            DevMindPackageManifest manifest = null;
+            ProductRecord record = null;
             string logPath = NewLogPath("install");
             result.LogPath = logPath;
             try
@@ -1173,7 +1201,6 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
 
                 string manifestPath = Path.Combine(tempRoot, "devmind.package.json");
                 string packageManifestSignature;
-                DevMindPackageManifest manifest;
                 string payloadPath;
                 bool smartPackage = !File.Exists(manifestPath);
                 ExtensionProfile smartProfile = null;
@@ -1260,7 +1287,7 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
                         throw new InvalidDataException("Required file is missing after installation: " + req);
                 }
 
-                ProductRecord record = new ProductRecord();
+                record = new ProductRecord();
                 record.ProductId = manifest.ProductId;
                 record.DisplayName = string.IsNullOrWhiteSpace(manifest.DisplayName) ? manifest.ProductId : manifest.DisplayName;
                 record.Version = manifest.Version;
@@ -1318,6 +1345,7 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
                 result.Success = false;
                 result.Message = ex.Message;
                 TryRollbackFailedInstall(installPath, rollbackPath, logPath);
+                ReportPackageOperationFailure(packagePath, manifest, record, ex, logPath, installPath);
                 ErrorSignal(ex, logPath);
                 return result;
             }
@@ -1443,6 +1471,13 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
                     psi.Arguments = record.Arguments ?? "";
                 }
 
+                bool captureConsoleStreams = !psi.UseShellExecute && IsConsoleEntryType(type);
+                if (captureConsoleStreams)
+                {
+                    psi.RedirectStandardOutput = true;
+                    psi.RedirectStandardError = true;
+                }
+
                 if (!psi.UseShellExecute)
                 {
                     psi.EnvironmentVariables["DEVMIND_PRODUCT_ID"] = record.ProductId ?? "";
@@ -1456,6 +1491,8 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
                 if (p == null) throw new InvalidOperationException("Windows did not start the product process.");
                 initialPid = p.Id;
                 backendPid = initialPid;
+                if (!string.Equals(type, "html", StringComparison.OrdinalIgnoreCase))
+                    AttachLaunchProcessDiagnostics(record, p, entry, type, psi.FileName + " " + psi.Arguments, logPath, captureConsoleStreams);
             }
 
             if (!string.IsNullOrWhiteSpace(resolvedLaunchUrl))
@@ -1516,6 +1553,190 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
                 Thread.Sleep(Math.Min(5000, 350 * attempt));
             }
             throw new InvalidOperationException("Windows timed out while starting the product after 10 attempts. LaunchBridge did not modify the working installation.", last);
+        }
+
+        private const int MaxCapturedProcessText = 65536;
+
+        private static void AttachLaunchProcessDiagnostics(ProductRecord record, Process process, string entryPath, string entryType, string commandLine, string logPath, bool captureStreams)
+        {
+            if (record == null || process == null || process.Id <= 0) return;
+
+            LaunchProcessCapture capture = new LaunchProcessCapture();
+            capture.Process = process;
+            capture.ProcessId = process.Id;
+            capture.ProductId = record.ProductId;
+            capture.DisplayName = record.DisplayName;
+            capture.Version = record.Version;
+            capture.InstallPath = record.InstallPath;
+            capture.EntryPath = entryPath;
+            capture.EntryType = entryType;
+            capture.CommandLine = commandLine;
+            capture.LogPath = logPath;
+            capture.StartedAtUtc = DateTime.UtcNow;
+            capture.CaptureStreams = captureStreams;
+
+            if (captureStreams)
+            {
+                process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs args)
+                {
+                    AppendCapturedProcessLine(capture, capture.StandardOutput, args == null ? null : args.Data);
+                };
+                process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs args)
+                {
+                    AppendCapturedProcessLine(capture, capture.StandardError, args == null ? null : args.Data);
+                };
+            }
+
+            process.Exited += delegate { QueueLaunchProcessCompletion(capture); };
+            lock (LaunchProcessSync) launchProcessCaptures[capture.ProcessId] = capture;
+
+            try
+            {
+                process.EnableRaisingEvents = true;
+                if (captureStreams)
+                {
+                    process.BeginOutputReadLine();
+                    process.BeginErrorReadLine();
+                }
+                if (process.HasExited) QueueLaunchProcessCompletion(capture);
+            }
+            catch (Exception ex)
+            {
+                WriteLog(logPath, "Process diagnostic attachment warning: " + ex.Message);
+                try { if (process.HasExited) QueueLaunchProcessCompletion(capture); } catch { }
+            }
+        }
+
+        private static void AppendCapturedProcessLine(LaunchProcessCapture capture, StringBuilder target, string line)
+        {
+            if (capture == null || target == null || line == null) return;
+            lock (capture.TextSync)
+            {
+                if (target.Length >= MaxCapturedProcessText) return;
+                int remaining = MaxCapturedProcessText - target.Length;
+                string value = line.Length <= remaining ? line : line.Substring(0, remaining);
+                target.AppendLine(value);
+            }
+        }
+
+        private static void QueueLaunchProcessCompletion(LaunchProcessCapture capture)
+        {
+            if (capture == null || Interlocked.CompareExchange(ref capture.CompletionStarted, 1, 0) != 0) return;
+            ThreadPool.QueueUserWorkItem(delegate { CompleteLaunchProcessCapture(capture); });
+        }
+
+        private static void CompleteLaunchProcessCapture(LaunchProcessCapture capture)
+        {
+            if (capture == null) return;
+            int exitCode = int.MinValue;
+            string standardOutput = "";
+            string standardError = "";
+            bool suppressed = false;
+
+            try
+            {
+                // Give LaunchProductAttempt time to persist the launch record before a very fast
+                // script failure is converted into a durable Problems-tab item.
+                Thread.Sleep(300);
+                try { capture.Process.WaitForExit(); } catch { }
+                try { exitCode = capture.Process.ExitCode; } catch { }
+                lock (capture.TextSync)
+                {
+                    standardOutput = capture.StandardOutput.ToString();
+                    standardError = capture.StandardError.ToString();
+                }
+            }
+            finally
+            {
+                lock (LaunchProcessSync)
+                {
+                    launchProcessCaptures.Remove(capture.ProcessId);
+                    suppressed = suppressedExitIssuePids.Remove(capture.ProcessId);
+                }
+            }
+
+            try
+            {
+                WriteLog(capture.LogPath, "Product entry process exited. PID " + capture.ProcessId + ", exit code " + (exitCode == int.MinValue ? "unavailable" : exitCode.ToString()) + ".");
+                if (!string.IsNullOrWhiteSpace(standardError)) WriteLog(capture.LogPath, "Standard error:\r\n" + LimitText(standardError, MaxCapturedProcessText));
+                if (!string.IsNullOrWhiteSpace(standardOutput)) WriteLog(capture.LogPath, "Standard output:\r\n" + LimitText(standardOutput, MaxCapturedProcessText));
+            }
+            catch { }
+
+            try { capture.Process.Dispose(); } catch { }
+            if (suppressed || exitCode == int.MinValue || exitCode == 0) return;
+            ReportProductProcessExit(capture, exitCode, standardOutput, standardError);
+        }
+
+        private static void ReportProductProcessExit(LaunchProcessCapture capture, int exitCode, string standardOutput, string standardError)
+        {
+            string firstDiagnostic = FirstUsefulDiagnosticLine(standardError);
+            if (string.IsNullOrWhiteSpace(firstDiagnostic)) firstDiagnostic = FirstUsefulDiagnosticLine(standardOutput);
+
+            RuntimeIssue issue = new RuntimeIssue();
+            issue.ProductId = string.IsNullOrWhiteSpace(capture.ProductId) ? "unknown-product" : capture.ProductId;
+            issue.Product = capture.DisplayName;
+            issue.Version = capture.Version;
+            issue.Severity = "error";
+            issue.Type = "process-exit";
+            issue.Message = (capture.DisplayName ?? capture.ProductId ?? "The product") + " exited unexpectedly with code " + exitCode + "." +
+                (string.IsNullOrWhiteSpace(firstDiagnostic) ? "" : " " + firstDiagnostic);
+            issue.Source = capture.EntryPath;
+            issue.Title = "Entrypoint process exited";
+            issue.InstallPath = capture.InstallPath;
+            StringBuilder details = new StringBuilder();
+            details.AppendLine("Process ID: " + capture.ProcessId);
+            details.AppendLine("Entry type: " + (capture.EntryType ?? ""));
+            details.AppendLine("Command: " + (capture.CommandLine ?? ""));
+            details.AppendLine("Exit code: " + exitCode);
+            details.AppendLine("Launch log: " + (capture.LogPath ?? ""));
+            if (!string.IsNullOrWhiteSpace(standardError))
+            {
+                details.AppendLine();
+                details.AppendLine("Standard error:");
+                details.AppendLine(LimitText(standardError, 16000));
+            }
+            if (!string.IsNullOrWhiteSpace(standardOutput))
+            {
+                details.AppendLine();
+                details.AppendLine("Standard output:");
+                details.AppendLine(LimitText(standardOutput, 12000));
+            }
+            issue.Stack = details.ToString();
+            ReceiveRuntimeIssue(issue);
+
+            ProductRecord current = FindInstalledProduct(capture.ProductId);
+            if (current != null && (current.LastLauncherProcessId == capture.ProcessId || current.LastProcessId == capture.ProcessId))
+            {
+                current.LastKnownStatus = "Crashed (exit code " + exitCode + ")";
+                current.LastAutoStopReason = "The entry process exited unexpectedly with code " + exitCode + ".";
+                current.LastProcessId = 0;
+                current.LastLauncherProcessId = 0;
+                current.LastLauncherEntryType = null;
+                UpsertProduct(current);
+            }
+        }
+
+        private static string FirstUsefulDiagnosticLine(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return "";
+            string[] lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+            foreach (string line in lines)
+            {
+                string value = (line ?? "").Trim();
+                if (value.Length == 0) continue;
+                return value.Length <= 300 ? value : value.Substring(0, 300) + "...";
+            }
+            return "";
+        }
+
+        private static void SuppressProcessExitIssue(int processId)
+        {
+            if (processId <= 0) return;
+            lock (LaunchProcessSync)
+            {
+                if (launchProcessCaptures.ContainsKey(processId)) suppressedExitIssuePids.Add(processId);
+            }
         }
 
         private sealed class LocalLaunchHealth
@@ -2518,6 +2739,7 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
         private static bool TryClosePid(int processId, bool force)
         {
             if (processId <= 0 || processId == Process.GetCurrentProcess().Id || !IsProcessRunning(processId)) return false;
+            SuppressProcessExitIssue(processId);
             try
             {
                 if (!force)
@@ -3197,19 +3419,128 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
             }
         }
 
+        private static void ReportPackageOperationFailure(string packagePath, DevMindPackageManifest manifest, ProductRecord record, Exception ex, string logPath, string installPath)
+        {
+            try
+            {
+                string fileName = string.IsNullOrWhiteSpace(packagePath) ? "package" : Path.GetFileNameWithoutExtension(packagePath);
+                string fallbackId = Regex.Replace((fileName ?? "package").ToLowerInvariant(), "[^a-z0-9._-]+", "-").Trim('-', '_', '.');
+                if (string.IsNullOrWhiteSpace(fallbackId)) fallbackId = "package";
+
+                RuntimeIssue issue = new RuntimeIssue();
+                issue.ProductId = record != null && !string.IsNullOrWhiteSpace(record.ProductId)
+                    ? record.ProductId
+                    : (manifest != null && !string.IsNullOrWhiteSpace(manifest.ProductId) ? manifest.ProductId : "package." + fallbackId);
+                issue.Product = record != null && !string.IsNullOrWhiteSpace(record.DisplayName)
+                    ? record.DisplayName
+                    : (manifest != null && !string.IsNullOrWhiteSpace(manifest.DisplayName) ? manifest.DisplayName : fileName);
+                issue.Version = record != null ? record.Version : (manifest == null ? "" : manifest.Version);
+                issue.Severity = "error";
+                issue.Type = "install-or-launch-failure";
+                issue.Message = ex == null ? "LaunchBridge could not install or launch the package." : ex.Message;
+                issue.Stack = ex == null ? "" : ex.ToString();
+                issue.Source = packagePath;
+                issue.Title = "Package installation or launch failed";
+                issue.InstallPath = record != null ? record.InstallPath : installPath;
+                issue.BodySample = "Install log: " + (logPath ?? "");
+                ReceiveRuntimeIssue(issue);
+            }
+            catch { }
+        }
+
         public static void ReportFatal(Exception ex)
         {
             try
             {
+                if (ex == null) ex = new Exception("Unknown fatal error");
                 string log = NewLogPath("fatal");
                 WriteLog(log, ex.ToString());
+                try
+                {
+                    RuntimeIssue issue = new RuntimeIssue();
+                    issue.ProductId = "devmind-launchbridge";
+                    issue.Product = "LaunchBridge";
+                    issue.Version = "0.3.3";
+                    issue.Severity = "fatal";
+                    issue.Type = "launchbridge-fatal";
+                    issue.Message = ex.Message;
+                    issue.Stack = ex.ToString();
+                    issue.Source = "LaunchBridge.exe";
+                    issue.Title = "LaunchBridge unexpected error";
+                    issue.InstallPath = appRoot;
+                    issue.BodySample = "Fatal log: " + log;
+                    ReceiveRuntimeIssue(issue);
+                }
+                catch { }
                 ErrorSignal(ex, log);
-                MessageBox.Show("LaunchBridge encountered an unexpected error.\r\n\r\n" + ex.Message + "\r\n\r\nThe error was copied to your clipboard.\r\nLog: " + log,
+                MessageBox.Show("LaunchBridge encountered an unexpected error.\r\n\r\n" + ex.Message + "\r\n\r\nThe error was copied to your clipboard and saved in Problems.\r\nLog: " + log,
                     "LaunchBridge", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch { }
         }
 
+
+        private static void LoadRecentRuntimeIssues()
+        {
+            try
+            {
+                DateTime clearedAtUtc = DateTime.MinValue;
+                if (!string.IsNullOrWhiteSpace(runtimeIssueClearMarkerPath) && File.Exists(runtimeIssueClearMarkerPath))
+                {
+                    DateTime parsed;
+                    if (DateTime.TryParse(File.ReadAllText(runtimeIssueClearMarkerPath, Encoding.UTF8), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out parsed))
+                        clearedAtUtc = parsed.ToUniversalTime();
+                }
+
+                List<RuntimeIssue> loaded = new List<RuntimeIssue>();
+                HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                string[] files = Directory.GetFiles(runtimeIssuesRoot, "runtime-issues-*.jsonl", SearchOption.TopDirectoryOnly)
+                    .OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase)
+                    .Take(14)
+                    .ToArray();
+                foreach (string file in files)
+                {
+                    string[] lines;
+                    try { lines = File.ReadAllLines(file, Encoding.UTF8); }
+                    catch { continue; }
+                    for (int i = lines.Length - 1; i >= 0 && loaded.Count < 500; i--)
+                    {
+                        string line = lines[i];
+                        if (string.IsNullOrWhiteSpace(line)) continue;
+                        RuntimeIssue issue;
+                        try { issue = serializer.Deserialize<RuntimeIssue>(line); }
+                        catch { continue; }
+                        if (issue == null) continue;
+                        DateTime received;
+                        if (DateTime.TryParse(issue.ReceivedAtUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out received) &&
+                            received.ToUniversalTime() <= clearedAtUtc) continue;
+                        string key = string.IsNullOrWhiteSpace(issue.IssueId)
+                            ? (issue.ProductId ?? "") + "|" + (issue.Type ?? "") + "|" + (issue.Message ?? "") + "|" + (issue.ReceivedAtUtc ?? "")
+                            : issue.IssueId;
+                        if (!seen.Add(key)) continue;
+                        loaded.Add(issue);
+                    }
+                    if (loaded.Count >= 500) break;
+                }
+
+                loaded = loaded.OrderByDescending(x =>
+                {
+                    DateTime value;
+                    return DateTime.TryParse(x == null ? null : x.ReceivedAtUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out value)
+                        ? value.ToUniversalTime()
+                        : DateTime.MinValue;
+                }).Take(500).ToList();
+                lock (Sync)
+                {
+                    runtimeIssues.Clear();
+                    runtimeIssues.AddRange(loaded);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Runtime issue history warning: " + ex.Message);
+            }
+        }
 
         public static List<RuntimeIssue> RuntimeIssuesSnapshot()
         {
@@ -3225,6 +3556,12 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
             {
                 runtimeIssues.Clear();
             }
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(runtimeIssueClearMarkerPath))
+                    File.WriteAllText(runtimeIssueClearMarkerPath, DateTime.UtcNow.ToString("o"), new UTF8Encoding(false));
+            }
+            catch { }
         }
 
         public static string BuildRuntimeIssuePacket(RuntimeIssue issue)
@@ -3622,7 +3959,7 @@ private static ExtensionProfile ResolveSmartPackageProfile(string packagePath)
             lines.Add("Turbo Launch enabled: " + TurboLaunchEnabled);
             lines.Add("Runtime Error Cockpit enabled: " + RuntimeMonitorEnabled);
             lines.Add("Runtime issue intake port: " + runtimeIssuePort);
-            lines.Add("Runtime issues captured this session: " + RuntimeIssuesSnapshot().Count);
+            lines.Add("Recorded app problems loaded: " + RuntimeIssuesSnapshot().Count);
             lines.Add("Result: PASS");
             string report = string.Join(Environment.NewLine, lines.ToArray());
             File.WriteAllText(Path.Combine(appRoot, "SELF_TEST.txt"), report, Encoding.UTF8);

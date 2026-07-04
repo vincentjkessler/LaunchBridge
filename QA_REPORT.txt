@@ -1,15 +1,21 @@
-LaunchBridge v0.3.1 QA REPORT
+LaunchBridge v0.3.3 QA REPORT
 
-Primary change: Smart Click reliability fix.
+Primary change: keep Problems-tab actions visible and make explicit copying clear.
 
-Checks:
-- Browser manifest JSON parses and retains downloads, nativeMessaging, notifications, and storage permissions.
-- Content script records pointer-down before download creation and deduplicates click fallback.
-- Background worker persists pending/tracked transactions in chrome.storage.session.
-- Background worker supports retroactive matching, approved referrer fallback, recovery, and native ping.
-- Native host supports ping and openDownloadedBuild actions.
-- Required files present.
-- Payload hashes regenerated.
-- Package ZIP integrity validated.
+Validated statically:
+- Package root contains devmind.package.json and payload/ with no extra wrapper folder.
+- Required source, updater, icon, runtime configuration, and Smart Click files are present.
+- Every payload file is covered by a lowercase SHA-256 manifest hash.
+- Problems actions are positioned directly below the Problems grid and above the technical repair packet.
+- Copy problem details returns success/failure and updates the visible plain-language status.
+- The v0.3.2 native process-exit capture, persistent Problems history, and Publisher-header correction remain present.
+- Version and self-update staging identifiers are 0.3.3.
+- ZIP archive integrity and manifest hashes validate.
 
-The target Windows machine still performs authoritative C# compilation before replacement.
+Authoritative Windows checks still performed by the updater:
+- .NET Framework csc compilation of all five LaunchBridge source files.
+- Compile-before-replace; the working LaunchBridge executable is not stopped unless compilation passes.
+- SHA-256 verification of the installed executable after replacement.
+
+Required visual check on Windows:
+- Resize LaunchBridge to a short window and confirm Copy problem details remains visible above the repair packet.

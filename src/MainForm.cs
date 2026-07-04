@@ -107,7 +107,7 @@ namespace DevMind.LaunchBridge
             pendingPackage = packagePath;
             pendingPackageSource = string.IsNullOrWhiteSpace(initialPackageSource) ? "Browser Open file" : initialPackageSource;
             startHidden = hiddenStart;
-            Text = "LaunchBridge v0.3.1";
+            Text = "LaunchBridge v0.3.3";
             Width = 1160;
             Height = 980;
             MinimumSize = new Size(1080, 880);
@@ -255,7 +255,23 @@ namespace DevMind.LaunchBridge
             foreach (ProductRecord product in LaunchBridgeCore.InstalledProductsSnapshot())
             {
                 bool running;
-                if (product == null || string.IsNullOrWhiteSpace(product.ProductId) || !states.TryGetValue(product.ProductId, out running) || !running) continue;
+                if (product == null || string.IsNullOrWhiteSpace(product.ProductId) || !states.TryGetValue(product.ProductId, out running)) continue;
+                if (!running)
+                {
+                    if (!string.IsNullOrWhiteSpace(product.LastKnownStatus) && product.LastKnownStatus.StartsWith("Crashed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ActivityRecord failed = activityRecords.FirstOrDefault(x => string.Equals(x.ProductId, product.ProductId, StringComparison.OrdinalIgnoreCase) &&
+                            (x.Status == "Running" || x.Status == "Launched" || x.Status == "Installing"));
+                        if (failed != null)
+                        {
+                            failed.Status = "Failed";
+                            failed.ProcessId = 0;
+                            failed.CompletedAtUtc = DateTime.UtcNow.ToString("o");
+                            failed.Message = string.IsNullOrWhiteSpace(product.LastAutoStopReason) ? product.LastKnownStatus : product.LastAutoStopReason;
+                        }
+                    }
+                    continue;
+                }
                 bool alreadyTracked = activityRecords.Any(x => string.Equals(x.ProductId, product.ProductId, StringComparison.OrdinalIgnoreCase) &&
                     (x.Status == "Running" || x.Status == "Launched" || x.Status == "Running without UI" || x.Status == "Installing" || x.Status == "Queued"));
                 if (alreadyTracked) continue;
@@ -511,13 +527,13 @@ namespace DevMind.LaunchBridge
             title.Location = new Point(28, 22);
             page.Controls.Add(title);
 
-            Label text = BodyLabel("LaunchBridge watches your apps for crashes, blank screens, missing files, and failed web requests. It saves the details so the problem can be fixed.");
+            Label text = BodyLabel("LaunchBridge watches app entry processes, package launches, blank screens, missing files, and failed web requests. It saves failures here even after LaunchBridge restarts.");
             text.Location = new Point(30, title.Bottom + 10);
             text.MaximumSize = new Size(900, 0);
             page.Controls.Add(text);
 
             errorSummary = new Label();
-            errorSummary.Text = "Runtime monitor ready. No issues captured this session.";
+            errorSummary.Text = "Runtime monitor ready. No app problems recorded.";
             errorSummary.Font = new Font("Segoe UI Semibold", 10F);
             errorSummary.ForeColor = Ink;
             errorSummary.BackColor = Color.FromArgb(226, 244, 246);
@@ -565,7 +581,9 @@ namespace DevMind.LaunchBridge
             page.Controls.Add(errorGrid);
 
             errorDetail = new RichTextBox();
-            errorDetail.Location = new Point(30, errorGrid.Bottom + 16);
+            // Keep the action buttons above the technical details so they remain visible
+            // even when LaunchBridge is used in a shorter window.
+            errorDetail.Location = new Point(30, errorGrid.Bottom + 64);
             errorDetail.Size = new Size(920, 150);
             errorDetail.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             errorDetail.Multiline = true;
@@ -576,37 +594,41 @@ namespace DevMind.LaunchBridge
             page.Controls.Add(errorDetail);
 
             Button copyPacket = AccentButton("Copy problem details");
-            copyPacket.Location = new Point(30, errorDetail.Bottom + 16);
+            copyPacket.Location = new Point(30, errorGrid.Bottom + 14);
             copyPacket.Width = 150;
-            copyPacket.Click += delegate { CopySelectedRuntimeIssue(true); };
+            copyPacket.Click += delegate
+            {
+                if (CopySelectedRuntimeIssue(true) && errorSummary != null)
+                    errorSummary.Text = "Problem details copied. Paste them into ChatGPT or another repair tool.";
+            };
             page.Controls.Add(copyPacket);
 
             Button openChat = SecondaryButton("Copy + ChatGPT");
-            openChat.Location = new Point(192, errorDetail.Bottom + 16);
+            openChat.Location = new Point(192, errorGrid.Bottom + 14);
             openChat.Width = 145;
             openChat.Click += delegate { OpenSelectedIssueInChatGPT(); };
             page.Controls.Add(openChat);
 
             Button openFolder = SecondaryButton("Open product folder");
-            openFolder.Location = new Point(349, errorDetail.Bottom + 16);
+            openFolder.Location = new Point(349, errorGrid.Bottom + 14);
             openFolder.Width = 155;
             openFolder.Click += delegate { OpenSelectedIssueFolder(); };
             page.Controls.Add(openFolder);
 
             Button openLogs = SecondaryButton("Open problem logs");
-            openLogs.Location = new Point(516, errorDetail.Bottom + 16);
+            openLogs.Location = new Point(516, errorGrid.Bottom + 14);
             openLogs.Width = 135;
             openLogs.Click += delegate { Process.Start("explorer.exe", Path.Combine(LaunchBridgeCore.AppRoot, "runtime-issues")); };
             page.Controls.Add(openLogs);
 
             Button repairBundle = SecondaryButton("Open fix files");
-            repairBundle.Location = new Point(663, errorDetail.Bottom + 16);
+            repairBundle.Location = new Point(663, errorGrid.Bottom + 14);
             repairBundle.Width = 145;
             repairBundle.Click += delegate { OpenSelectedRepairBundle(); };
             page.Controls.Add(repairBundle);
 
             Button clear = SecondaryButton("Clear list");
-            clear.Location = new Point(820, errorDetail.Bottom + 16);
+            clear.Location = new Point(820, errorGrid.Bottom + 14);
             clear.Width = 125;
             clear.Click += delegate
             {
@@ -1189,11 +1211,11 @@ namespace DevMind.LaunchBridge
             productsGrid.RowHeadersVisible = false;
             ApplyReadableGridLayout(productsGrid);
             productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Product", DataPropertyName = "Product", HeaderText = "Product", Width = 190, MinimumWidth = 120, Frozen = true });
+            productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Publisher", DataPropertyName = "Publisher", HeaderText = "Publisher", Width = 210, MinimumWidth = 150, Frozen = true });
             productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Version", DataPropertyName = "Version", HeaderText = "Version", Width = 80, MinimumWidth = 60 });
-            productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", DataPropertyName = "Status", HeaderText = "Status", Width = 135, MinimumWidth = 90 });
+            productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", DataPropertyName = "Status", HeaderText = "Status", Width = 150, MinimumWidth = 100 });
             productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "AppPID", DataPropertyName = "AppPID", HeaderText = "App PID", Width = 80, MinimumWidth = 65 });
             productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "UI", DataPropertyName = "UI", HeaderText = "UI target", Width = 210, MinimumWidth = 120 });
-            productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Publisher", DataPropertyName = "Publisher", HeaderText = "Publisher", Width = 160, MinimumWidth = 100 });
             productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Installed", DataPropertyName = "Installed", HeaderText = "Installed", Width = 205, MinimumWidth = 130 });
             productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Path", DataPropertyName = "Path", HeaderText = "Install path", Width = 430, MinimumWidth = 200 });
             productsGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "ProductId", DataPropertyName = "ProductId", HeaderText = "ProductId", Visible = false });
@@ -2738,8 +2760,8 @@ catch {
             catch { }
             errorSummary.Text = LaunchBridgeCore.RuntimeMonitorEnabled
                 ? (issues.Count == 0
-                    ? "Runtime monitor active on 127.0.0.1:" + LaunchBridgeCore.RuntimeIssuePort + ". No issues captured this session."
-                    : issues.Count + " runtime issue(s) captured this session. The newest issue is copied and surfaced automatically when enabled.")
+                    ? "Runtime monitor active on 127.0.0.1:" + LaunchBridgeCore.RuntimeIssuePort + ". No app problems recorded."
+                    : issues.Count + " app problem(s) recorded. The newest problem is copied and surfaced automatically when enabled.")
                 : "Runtime monitor is disabled in Settings.";
 
             RuntimeIssue newest = issues.FirstOrDefault();
@@ -2778,12 +2800,25 @@ catch {
             errorDetail.Text = issue == null ? "Select an issue to inspect its complete repair packet." : LaunchBridgeCore.BuildRuntimeIssuePacket(issue);
         }
 
-        private void CopySelectedRuntimeIssue(bool fullPacket)
+        private bool CopySelectedRuntimeIssue(bool fullPacket)
         {
             RuntimeIssue issue = SelectedRuntimeIssue();
-            if (issue == null) return;
+            if (issue == null)
+            {
+                if (errorSummary != null) errorSummary.Text = "Select a problem first, then choose Copy problem details.";
+                return false;
+            }
             string text = fullPacket ? LaunchBridgeCore.BuildRuntimeIssuePacket(issue) : (issue.Message ?? "");
-            try { Clipboard.SetText(text); } catch { }
+            try
+            {
+                Clipboard.SetText(text);
+                return true;
+            }
+            catch
+            {
+                if (errorSummary != null) errorSummary.Text = "LaunchBridge could not copy the details. Select the text below and copy it manually.";
+                return false;
+            }
         }
 
         private void OpenSelectedIssueInChatGPT()
