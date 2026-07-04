@@ -1,3 +1,7 @@
+Nowadays, ChatGPT (and other AI) generates download links to give you files. Normally you have to click the link, wait for it to download, then go to your file explorer (if you are on Windows like myself), locate the .bat or other (if you had one made), or open powershell and paste a run command block; do all that to run your AI-made file. 
+
+This eradicates all that. With the helper, you simply click on that download link, and BOOM, LaunchBridge runs it immediately.
+
 # LaunchBridge
 
 LaunchBridge is a small Windows app that opens local app packages.
